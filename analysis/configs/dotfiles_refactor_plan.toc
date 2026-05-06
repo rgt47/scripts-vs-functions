@@ -1,0 +1,59 @@
+\contentsline {section}{\numberline {1}Context and Scope}{2}{section.1}%
+\contentsline {paragraph}{\nonumberline Out of scope.}{2}{paragraph*.3}%
+\contentsline {section}{\numberline {2}Audit Summary}{2}{section.2}%
+\contentsline {subsection}{\numberline {2.1}The startup file}{2}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}The script directory}{2}{subsection.2.2}%
+\contentsline {section}{\numberline {3}Guiding Principle}{3}{section.3}%
+\contentsline {section}{\numberline {4}Phased Refactor}{3}{section.4}%
+\contentsline {subsection}{\numberline {4.1}Phase 1: extract the largest function}{3}{subsection.4.1}%
+\contentsline {paragraph}{\nonumberline Action.}{4}{paragraph*.5}%
+\contentsline {paragraph}{\nonumberline Effort.}{4}{paragraph*.7}%
+\contentsline {paragraph}{\nonumberline Acceptance criteria.}{4}{paragraph*.9}%
+\contentsline {subsection}{\numberline {4.2}Phase 2: extract the small functions}{4}{subsection.4.2}%
+\contentsline {paragraph}{\nonumberline Action.}{4}{paragraph*.11}%
+\contentsline {paragraph}{\nonumberline Effort.}{5}{paragraph*.13}%
+\contentsline {paragraph}{\nonumberline Acceptance criteria.}{5}{paragraph*.15}%
+\contentsline {paragraph}{\nonumberline Note on \texttt {mr}.}{5}{paragraph*.17}%
+\contentsline {subsection}{\numberline {4.3}Phase 3: promote microscripts to aliases}{5}{subsection.4.3}%
+\contentsline {paragraph}{\nonumberline Action.}{5}{paragraph*.19}%
+\contentsline {paragraph}{\nonumberline Note on \texttt {bb}.}{5}{paragraph*.21}%
+\contentsline {paragraph}{\nonumberline Effort.}{5}{paragraph*.23}%
+\contentsline {paragraph}{\nonumberline Acceptance criteria.}{5}{paragraph*.25}%
+\contentsline {subsection}{\numberline {4.4}Phase 4: harden the remaining microscripts}{5}{subsection.4.4}%
+\contentsline {paragraph}{\nonumberline Action.}{6}{paragraph*.27}%
+\contentsline {paragraph}{\nonumberline Effort.}{6}{paragraph*.29}%
+\contentsline {paragraph}{\nonumberline Acceptance criteria.}{6}{paragraph*.31}%
+\contentsline {subsection}{\numberline {4.5}Phase 5: consolidate the latest-of helpers}{6}{subsection.4.5}%
+\contentsline {paragraph}{\nonumberline Action.}{6}{paragraph*.33}%
+\contentsline {paragraph}{\nonumberline Effort.}{6}{paragraph*.35}%
+\contentsline {paragraph}{\nonumberline Acceptance criteria.}{6}{paragraph*.37}%
+\contentsline {subsection}{\numberline {4.6}Phase 6: clean up non-executables}{6}{subsection.4.6}%
+\contentsline {paragraph}{\nonumberline Action.}{6}{paragraph*.39}%
+\contentsline {paragraph}{\nonumberline Effort.}{6}{paragraph*.41}%
+\contentsline {paragraph}{\nonumberline Acceptance criteria.}{6}{paragraph*.43}%
+\contentsline {subsection}{\numberline {4.7}Phase 7: decommission the archive directory}{7}{subsection.4.7}%
+\contentsline {paragraph}{\nonumberline Action.}{7}{paragraph*.45}%
+\contentsline {paragraph}{\nonumberline Effort.}{7}{paragraph*.47}%
+\contentsline {paragraph}{\nonumberline Acceptance criteria.}{7}{paragraph*.49}%
+\contentsline {subsection}{\numberline {4.8}Phase 8: naming hygiene}{7}{subsection.4.8}%
+\contentsline {paragraph}{\nonumberline Action.}{8}{paragraph*.53}%
+\contentsline {paragraph}{\nonumberline Effort.}{8}{paragraph*.55}%
+\contentsline {paragraph}{\nonumberline Acceptance criteria.}{8}{paragraph*.57}%
+\contentsline {subsection}{\numberline {4.9}Phase 9: install a guardrail}{8}{subsection.4.9}%
+\contentsline {paragraph}{\nonumberline Action.}{8}{paragraph*.59}%
+\contentsline {paragraph}{\nonumberline Effort.}{9}{paragraph*.61}%
+\contentsline {paragraph}{\nonumberline Acceptance criteria.}{9}{paragraph*.63}%
+\contentsline {section}{\numberline {5}Effort and Sequencing}{9}{section.5}%
+\contentsline {section}{\numberline {6}Risks and Mitigations}{9}{section.6}%
+\contentsline {paragraph}{\nonumberline Schedulers refer to file names.}{9}{paragraph*.65}%
+\contentsline {paragraph}{\nonumberline Zsh-only constructs in extracted code.}{9}{paragraph*.67}%
+\contentsline {paragraph}{\nonumberline Working directory and PATH inheritance.}{9}{paragraph*.69}%
+\contentsline {paragraph}{\nonumberline Secrets in extracted code.}{10}{paragraph*.71}%
+\contentsline {paragraph}{\nonumberline Shellcheck false positives.}{10}{paragraph*.73}%
+\contentsline {paragraph}{\nonumberline Loss of in-session state on accidental sourcing.}{10}{paragraph*.75}%
+\contentsline {section}{\numberline {7}Validation Plan}{10}{section.7}%
+\contentsline {section}{\numberline {8}Expected Outcomes}{10}{section.8}%
+\contentsline {paragraph}{\nonumberline Caveat on the startup-time projection.}{11}{paragraph*.77}%
+\contentsline {section}{\numberline {A}Replacement for ss / vv / zz (Phase 5)}{11}{appendix.A}%
+\contentsline {section}{\numberline {B}Glossary}{12}{appendix.B}%
+\providecommand \tocbasic@end@toc@file {}\tocbasic@end@toc@file 

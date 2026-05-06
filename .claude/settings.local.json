@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/zenn/Library/CloudStorage/Dropbox/dotfiles/**)",
+      "Bash(sed -i.tmp '253{N;s/\\\\n\\\\n/\\\\n# gz, _gz_secret_scan, gz-scan-history extracted to ~\\\\/bin\\\\/ on 2026-05-03.\\\\n\\\\n/;}' zshrc.new)",
+      "Bash(rm zshrc.new.tmp)",
+      "Bash(sed -n '250,258p' zshrc.new)",
+      "Bash(mv zshrc.new zshrc)",
+      "Bash(rm /Users/zenn/Library/CloudStorage/Dropbox/dotfiles/zshrc.new)",
+      "Bash(awk 'NR <= 253 {print} NR == 254 {print \"# gz, _gz_secret_scan, gz-scan-history extracted to ~/bin/ on 2026-05-03.\"; print \"\"} NR >= 599 {print}' zshrc)",
+      "Bash(sed -n '250,260p' zshrc.tmp)",
+      "Bash(zsh -n zshrc.tmp)",
+      "Bash(zsh -n /Users/zenn/Library/CloudStorage/Dropbox/dotfiles/zshrc.tmp)",
+      "Bash(mv /Users/zenn/Library/CloudStorage/Dropbox/dotfiles/zshrc.tmp /Users/zenn/Library/CloudStorage/Dropbox/dotfiles/zshrc)",
+      "Bash(zsh -i -c 'whence -v gz; whence -v gz-scan-history; whence -v _gz_secret_scan')",
+      "Bash(zsh -n /Users/zenn/Library/CloudStorage/Dropbox/dotfiles/zshrc)",
+      "Bash(zsh -i -c 'alias gg; alias k; alias bb')",
+      "Bash(mv ~/bin/archive ~/bin-relocated-20260503/archive)",
+      "Read(//Users/zenn/bin-relocated-20260503/**)",
+      "Bash(shellcheck ~/bin/backup_research.sh)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(bash -n ~/bin/backup_research.sh)",
+      "Bash(shellcheck ~/bin/tn)"
+    ]
+  }
+}

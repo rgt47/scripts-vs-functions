@@ -1,0 +1,812 @@
+\documentclass[11pt,letterpaper]{scrartcl}
+
+% =====================================================================
+% Engine: xelatex (required for the unicode monofont below).
+% =====================================================================
+
+\usepackage{fontspec}
+\setmonofont{DejaVu Sans Mono}[Scale=0.85]
+
+\usepackage[margin=1in]{geometry}
+\usepackage[colorlinks=true,
+            linkcolor=blue!50!black,
+            urlcolor=blue!50!black,
+            citecolor=blue!50!black]{hyperref}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{enumitem}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{listings}
+
+% Listings: shaded background, wrap long lines, use the mono font.
+\definecolor{codebg}{HTML}{F5F5F5}
+\lstset{
+  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{codebg},
+  breaklines=true,
+  breakatwhitespace=false,
+  columns=fullflexible,
+  frame=single,
+  framerule=0pt,
+  framesep=4pt,
+  xleftmargin=4pt,
+  xrightmargin=4pt,
+  showstringspaces=false,
+  keepspaces=true,
+}
+
+\setlist[itemize]{topsep=2pt,itemsep=2pt,parsep=0pt}
+\setlist[enumerate]{topsep=2pt,itemsep=2pt,parsep=0pt}
+
+\title{A Phased Refactor of a Personal Shell Toolbox\\
+       \large An audit and remediation plan for
+       \texttt{.zshrc} and \texttt{\textasciitilde/bin}}
+\author{R.\ G.\ Thomas}
+\date{2 May 2026}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+\noindent
+This white paper documents a concrete, phased refactor of a working
+quantitative researcher's personal shell toolbox. The toolbox under
+audit comprises a 736-line \texttt{.zshrc} and a
+\texttt{\textasciitilde/bin} directory holding roughly sixty
+top-level entries. The audit identifies two categories of
+misalignment: shell functions that mutate no shell state and should
+be versioned scripts; and microscripts that exist only because their
+authors pre-dated discovering the alias. A guiding principle resolves
+both inversions: \emph{a helper should be a shell function only when
+it must mutate the calling shell, otherwise it should be a versioned,
+executable script in} \texttt{\textasciitilde/bin}. The paper applies
+this rule to specific helpers, sequences the refactor into nine
+independently shippable phases, lists effort estimates and acceptance
+criteria, and surfaces the risks worth managing during execution.
+\end{abstract}
+
+\tableofcontents
+
+\section{Context and Scope}
+
+A personal shell toolbox accumulates over years of incremental work.
+Each helper is added in response to a specific irritation, and the
+choice between placing it in \texttt{.zshrc} as a function or in
+\texttt{\textasciitilde/bin} as a script is typically made by which
+file happens to be open in the editor at the moment. After several
+years of accretion, the toolbox remains functional, but the boundary
+between the two locations has eroded: scripts in
+\texttt{\textasciitilde/bin} are sometimes aliases in disguise;
+functions in \texttt{.zshrc} sometimes span hundreds of lines of
+program logic that have no need for the calling shell's state.
+
+The toolbox examined here exhibits both inversions. The objective of
+this refactor is not to rewrite the toolbox from scratch (which would
+discard institutional knowledge embedded in working code), but to
+move each existing helper into the location its actual behaviour
+demands. The plan is structured so that each phase is independently
+shippable and reversible; no phase commits the author to the next.
+
+\paragraph{Out of scope.} Replacement of the toolbox by a
+configuration-management system (Ansible, Nix, chezmoi) is a
+distinct, larger project and is not addressed here. Migration of
+Python or R helpers, whose execution model differs from POSIX
+scripts, is also out of scope. The plan operates only on shell-level
+artefacts.
+
+\section{Audit Summary}
+
+\subsection{The startup file}
+
+\texttt{.zshrc} comprises 736 lines distributed approximately as
+follows:
+
+\begin{itemize}
+  \item Configuration that legitimately belongs in the startup file
+        (PATH, history, completion, aliases, plugin loading, hooks):
+        roughly 200 lines.
+  \item Shell-state functions (navigation, dirstack, fzf-then-cd):
+        roughly 80 lines.
+  \item Functions that operate exclusively on external programs and
+        files, with no access to shell state:
+        roughly 450 lines.
+\end{itemize}
+
+The third category is the refactor target. It represents
+approximately 60\% of the file by line count and is the source of
+the file's loading cost, its opacity to static analysis, and its
+unsuitability for cross-host reuse.
+
+\subsection{The script directory}
+
+\texttt{\textasciitilde/bin} holds approximately sixty top-level
+entries. Distribution by category:
+
+\begin{itemize}
+  \item Hardened scripts with shebangs, quoted variables, and
+        meaningful exit codes (\texttt{aws\_*.sh},
+        \texttt{rclone\_*.sh}, \texttt{git-*.sh}, and similar):
+        roughly 25 entries.
+  \item Microscripts under fifteen lines that reduce to a single
+        command pipeline (the alias-in-disguise category):
+        4 entries.
+  \item Microscripts that are correctly placed but unhardened (no
+        shebang, backticks, unquoted variables, dead code):
+        5 entries.
+  \item Non-executables (markdown documentation, PDFs, R package
+        metadata, project subdirectories): approximately 12 entries
+        plus 8 subdirectories.
+  \item A buried \texttt{archive/} subdirectory containing 40+
+        legacy files dating from 2021--2024, with extensive
+        duplication.
+\end{itemize}
+
+\section{Guiding Principle}
+
+The rule that drives the refactor is one sentence:
+
+\begin{quote}
+A helper should be a shell function only when it must mutate the
+calling shell. Otherwise it should be a versioned, executable script
+in \texttt{\textasciitilde/bin}.
+\end{quote}
+
+The four operations that require the function form, and that no
+script can perform on the parent shell's behalf, are:
+
+\begin{enumerate}
+  \item Change the working directory.
+  \item Export, set, or unset shell variables.
+  \item Modify aliases, options, key bindings, or completion
+        definitions.
+  \item Manipulate the directory stack, the command history, or the
+        job table.
+\end{enumerate}
+
+Anything outside that list (running a program, reading or writing
+files, formatting output, fetching from a URL, calling
+\texttt{git}, calling \texttt{make}, calling a database, parsing
+JSON) communicates with the surrounding world through file
+descriptors and exit codes alone, and is therefore a script's job.
+The mechanical reason is that a script runs in a child process
+spawned by \texttt{fork} and \texttt{execve}: the child receives a
+copy of the parent's exported environment, file descriptors, and
+arguments, but cannot modify the parent's memory. When the child
+exits, the parent learns only the bytes written to \texttt{stdout},
+the bytes written to \texttt{stderr}, and an integer exit code.
+
+The single explicit exception is \texttt{source} (equivalently
+\texttt{.}): the sourced file is read into the current shell rather
+than run in a child, so a \texttt{cd} or \texttt{export} inside a
+sourced file does affect the parent. Sourcing is reserved for
+files whose authors explicitly intend to operate on the parent's
+state (the startup file itself; the conda hook; plugin loaders);
+ordinary helpers should be invoked, not sourced.
+
+\section{Phased Refactor}
+
+Each phase below is independently shippable. Execution may stop
+between any two phases without leaving the toolbox in a worse
+state than at the start.
+
+\subsection{Phase 1: extract the largest function}
+
+The dominant function by line count is \texttt{gz()}, an
+interactive git-commit workflow with secret scanning, together
+with its private helper \texttt{\_gz\_secret\_scan()} and a
+companion \texttt{gz-scan-history()}. Combined size: roughly 330
+lines spanning startup-file lines 267--597. The function calls
+\texttt{git}, \texttt{gitleaks}, \texttt{fzf}, \texttt{awk}, and
+\texttt{sed}; it reads from \texttt{stdin}; it writes to
+\texttt{stdout}, \texttt{stderr}, and a log file. It mutates no
+shell state.
+
+\paragraph{Action.}
+\begin{itemize}
+  \item Create \texttt{\textasciitilde/bin/gz} with shebang
+        \texttt{\#!/usr/bin/env zsh}. The function uses
+        zsh-specific constructs (\texttt{\$\{(f)...\}},
+        \texttt{\$\{arr:\#\}}, \texttt{\$\{(j:,:)...\}},
+        \texttt{\$\{=var\}}, \texttt{typeset -U}) that bash will
+        not parse.
+  \item Inline \texttt{\_gz\_secret\_scan} into the same file (or
+        place it in \texttt{\textasciitilde/bin/lib/} and source
+        it).
+  \item Create \texttt{\textasciitilde/bin/gz-scan-history} with
+        the same shebang.
+  \item Apply hardening: \texttt{set -uo pipefail}. (Omit
+        \texttt{set -e} because both helpers conditionally probe
+        for gitleaks subcommands and tolerate non-zero exits in
+        that probe.)
+  \item Resolve all \texttt{shellcheck} findings or annotate
+        per-line with a justified \texttt{disable} comment.
+  \item Delete the three function definitions from \texttt{.zshrc}.
+  \item Verify by running \texttt{gz} end-to-end on a scratch
+        repository, including the secret-scan refusal path and the
+        \texttt{GZ\_ALLOW\_SECRET\_OVERRIDE} audited-override path.
+\end{itemize}
+
+\paragraph{Effort.} Half a day. Most of the time goes to the
+end-to-end verification, since the function has multiple branches
+that must each be exercised.
+
+\paragraph{Acceptance criteria.}
+\begin{itemize}
+  \item \texttt{gz} and \texttt{gz-scan-history} run from a fresh
+        shell without sourcing the dotfile.
+  \item \texttt{shellcheck \textasciitilde/bin/gz} returns clean.
+  \item Shell startup time, measured by
+        \texttt{time zsh -i -c exit}, decreases by a measurable
+        margin (typically 30--80\,ms on this size of extraction).
+\end{itemize}
+
+\subsection{Phase 2: extract the small functions}
+
+After Phase~1, several smaller functions remain in \texttt{.zshrc}
+that also fail the principle:
+
+\begin{longtable}{@{}lp{3.0in}l@{}}
+  \toprule
+  \textbf{Function} & \textbf{Behaviour} & \textbf{Destination} \\
+  \midrule
+  \texttt{pp()}   & \texttt{rg --files | rg '\textbackslash.pdf\$' | fzf | xargs zathura}                    & \texttt{\textasciitilde/bin/pp}   \\
+  \texttt{rr()}   & \texttt{rg --files | rg '\textbackslash.(R|Rmd)\$' | fzf | xargs vim}                    & \texttt{\textasciitilde/bin/rr}   \\
+  \texttt{mma()}  & one-arg wrapper around the Mathematica kernel binary                                     & \texttt{\textasciitilde/bin/mma}  \\
+  \texttt{mr()}   & \texttt{make -C "\$root" "\$\{@:-r\}"} from any project subdirectory                     & \texttt{\textasciitilde/bin/mr}   \\
+  \texttt{nav()}  & prints a static help table of the navigation shortcuts                                   & \texttt{\textasciitilde/bin/nav}  \\
+  \bottomrule
+\end{longtable}
+
+\paragraph{Action.} For each helper:
+
+\begin{itemize}
+  \item Copy the body to a file under
+        \texttt{\textasciitilde/bin/}, mark executable.
+  \item Add a shebang (\texttt{\#!/usr/bin/env bash} for the four
+        bash-portable cases; \texttt{\#!/usr/bin/env zsh} only if
+        the body uses zsh-only constructs).
+  \item Add \texttt{set -euo pipefail} unless a deliberate
+        deviation is documented in a comment.
+  \item Quote variable expansions; replace any backticks with
+        \texttt{\$(...)}.
+  \item Resolve \texttt{shellcheck} findings.
+  \item Delete the function definition from \texttt{.zshrc}.
+\end{itemize}
+
+\paragraph{Effort.} One hour total across all five helpers.
+
+\paragraph{Acceptance criteria.} Each script is callable from a
+fresh shell and from a non-interactive context (for example, from
+within a Makefile). Each is \texttt{shellcheck}-clean.
+
+\paragraph{Note on \texttt{mr}.} The \texttt{mr} function calls
+\texttt{\_zzcollab\_root}, which lives in \texttt{.zshrc} as a
+function and is not exported to child processes. The extracted
+\texttt{mr} script must therefore inline a small project-root
+walk rather than call the function. A few self-contained lines
+at the top of the script suffice.
+
+\subsection{Phase 3: promote microscripts to aliases}
+
+Four scripts in \texttt{\textasciitilde/bin} reduce to a single
+command pipeline with no flag parsing or branching. Each is more
+honestly expressed as an alias.
+
+\begin{longtable}{@{}lp{2.7in}l@{}}
+  \toprule
+  \textbf{Script} & \textbf{Body} & \textbf{Action} \\
+  \midrule
+  \texttt{\textasciitilde/bin/gg}    & \texttt{nohup .../ghostty >/dev/null 2>\&1 \&}             & alias and delete \\
+  \texttt{\textasciitilde/bin/k}     & \texttt{nohup .../kitty >/dev/null 2>\&1 \&}              & alias and delete \\
+  \texttt{\textasciitilde/bin/bb}    & \texttt{cd \textasciitilde/docs/personal; vim preludelist.tex} & alias as \texttt{vim} with absolute path; delete \\
+  \texttt{\textasciitilde/bin/start} & \texttt{git-repo-push.sh; brew upgrade; brew doctor; brew cleanup} & alias OR keep as a hardened script; author's choice \\
+  \bottomrule
+\end{longtable}
+
+\paragraph{Action.} Add the alias definitions to the relevant
+section of \texttt{.zshrc}. Delete the corresponding scripts.
+Confirm that no Makefile, launchd plist, or other repository
+references the deleted file names.
+
+\paragraph{Note on \texttt{bb}.} The current implementation
+performs an unnecessary \texttt{cd} before invoking \texttt{vim}.
+The \texttt{cd} happens in the script's child process and is
+discarded on exit (it has no observable effect). The cleanest
+alias passes the absolute path directly to \texttt{vim}:
+\texttt{alias bb='vim \textasciitilde/docs/personal/preludelist.tex'}.
+
+\paragraph{Effort.} Fifteen minutes.
+
+\paragraph{Acceptance criteria.} \texttt{alias gg}, \texttt{alias
+k}, \texttt{alias bb}, and (if chosen) \texttt{alias start} resolve
+to the expected definitions. The four files are absent from
+\texttt{\textasciitilde/bin}.
+
+\subsection{Phase 4: harden the remaining microscripts}
+
+Five scripts (\texttt{qcp}, \texttt{ss}, \texttt{vv}, \texttt{zz},
+\texttt{p2}) are correctly placed but unhardened. All five share
+the same defects:
+
+\begin{enumerate}
+  \item No shebang. The \texttt{file} utility reports them as
+        `ASCII text', not executables. They run only because the
+        parent shell falls back to \texttt{sh}.
+  \item Backticks for command substitution rather than
+        \texttt{\$(...)}.
+  \item Unquoted variable expansions (\texttt{\$filename},
+        \texttt{\$1}, \texttt{\$proj}). Filenames containing
+        whitespace will fail silently or, worse, succeed with the
+        wrong file.
+  \item In four of the five (\texttt{qcp}, \texttt{ss},
+        \texttt{vv}, \texttt{zz}), a variable named \texttt{proj}
+        is computed from \texttt{\$1} or \texttt{\$(pwd)} and then
+        never used except in debug \texttt{echo} calls. This is
+        dead code.
+\end{enumerate}
+
+\paragraph{Action.} Apply the standard hardening pass to each
+script: shebang, \texttt{set -euo pipefail}, replace backticks,
+quote variables, delete dead code, resolve all
+\texttt{shellcheck} findings.
+
+\paragraph{Effort.} One hour. Phase~5 reduces this further by
+collapsing the worst three.
+
+\paragraph{Acceptance criteria.}
+\texttt{file \textasciitilde/bin/\{qcp,ss,vv,zz,p2\}} reports each
+as a shell script. \texttt{shellcheck} returns clean.
+
+\subsection{Phase 5: consolidate the latest-of helpers}
+
+Three of the scripts hardened in Phase~4 (\texttt{ss},
+\texttt{vv}, \texttt{zz}) are the same script with different
+terminal commands at the bottom: each finds the most recent file
+matching a glob in the current directory, then opens it with a
+chosen viewer (\texttt{open -a Skim}, \texttt{vim},
+\texttt{zathura}). The duplication is gratuitous.
+
+\paragraph{Action.} Replace the three scripts with one
+parameterised helper plus three thin wrappers. The replacement
+(verbatim) is given in Appendix~A.
+
+\paragraph{Effort.} Twenty minutes.
+
+\paragraph{Acceptance criteria.} Each of \texttt{ss}, \texttt{vv},
+and \texttt{zz} continues to do exactly what it did before. The
+shared logic appears once. Adding a fourth viewer (for example,
+\texttt{Preview.app}) requires one new two-line wrapper.
+
+\subsection{Phase 6: clean up non-executables}
+
+The \texttt{\textasciitilde/bin} directory contains the following
+non-executable artefacts that should be relocated:
+
+\begin{itemize}
+  \item Documentation: \texttt{CLAUDE.md},
+        \texttt{README\_zzcollab.md},
+        \texttt{date\_filtering.md},
+        \texttt{refactor\_plan.md}. Move to a documentation
+        directory or to the relevant project repository.
+  \item R package metadata: \texttt{DESCRIPTION},
+        \texttt{LICENSE}, the \texttt{inst/} subdirectory, the
+        \texttt{tests/} subdirectory. Move to the package's own
+        repository.
+  \item PDFs: \texttt{README\_zzcollab\_2026-02-03\_0556.pdf},
+        \texttt{refactor\_plan\_2026-04-25\_0930.pdf}. Move to a
+        reference archive.
+  \item Project subdirectories: \texttt{analysis/},
+        \texttt{aws/}, \texttt{data/}, \texttt{init/},
+        \texttt{launchd/}. These appear to be entire project
+        workspaces that wandered into \texttt{\textasciitilde/bin}.
+        Confirm and relocate each.
+\end{itemize}
+
+\paragraph{Action.} For each item, identify the natural home and
+move it. Update any cross-references (Makefiles, launchd plists,
+documentation). Run \texttt{ls \textasciitilde/bin} after the
+sweep to confirm the directory now contains only executables and,
+optionally, a single \texttt{lib/} subdirectory for sourced
+helpers.
+
+\paragraph{Effort.} One hour.
+
+\paragraph{Acceptance criteria.} \texttt{find \textasciitilde/bin
+-maxdepth 1 -not -type f -not -name 'lib' -not -name '.'} returns
+nothing (or only the optional \texttt{lib/} directory).
+
+\subsection{Phase 7: decommission the archive directory}
+
+The buried \texttt{\textasciitilde/bin/archive/} subdirectory
+contains 40+ legacy files dating from 2021--2024, including
+multiple obvious duplicates (\texttt{vv}/\texttt{vvv}/\texttt{vvv.R};
+\texttt{sm}/\texttt{sm.R}/\texttt{sm.rmd}/\texttt{sm.txt};
+\texttt{tt}/\texttt{ttt}; \texttt{nn}/\texttt{nnn};
+\texttt{rrtools\_original.sh}/\texttt{rrtools.sh.bak2}); broken
+symlinks (\texttt{firefox.macos -> ff},
+\texttt{mvim -> /usr/bin/gvimdiff}); and stub files of fewer than
+fifty bytes.
+
+The directory exists because at some prior point the author
+hesitated to delete the files and stowed them out of sight
+instead. That decision should be revisited now that the dotfiles
+are under version control: git history preserves the removed
+code, and the working tree should not.
+
+\paragraph{Action.} Delete the directory in a single commit with
+a descriptive message that names the rationale (`legacy
+unreferenced helpers, last touched 2024-XX-XX, removed during
+toolbox refactor; recoverable from git history if ever needed').
+
+\paragraph{Effort.} Five minutes (plus a brief audit to confirm
+none of the archived files is referenced by a script or
+scheduler still in use).
+
+\paragraph{Acceptance criteria.} \texttt{\textasciitilde/bin/archive/}
+no longer exists. \texttt{git log} preserves the deleted
+content for any future recovery.
+
+\subsection{Phase 8: naming hygiene}
+
+Several helpers carry names that fail the legibility standard the
+rest of the refactor enforces. The renames proposed below are for
+review, not for unilateral application: short names are sometimes
+defensible on grounds of frequency-of-use, and the author is the
+only person who knows which fall into that category. The proposed
+disposition is divided into three sub-phases by category.
+
+\subsubsection*{8a. Application launchers}
+
+Two scripts launch terminal emulators with single- or
+double-character names that collide with conventional grep
+targets (\texttt{gg} is also common shorthand for
+\texttt{git grep}). After Phase~3 these become aliases; the
+rename and the promotion should land in the same commit.
+
+\begin{longtable}{@{}llp{2.7in}@{}}
+  \toprule
+  \textbf{Current} & \textbf{Proposed} & \textbf{Rationale} \\
+  \midrule
+  \texttt{\textasciitilde/bin/gg} & \texttt{alias ghostty=...} & Matches the binary name \\
+  \texttt{\textasciitilde/bin/k}  & \texttt{alias kitty=...}   & Matches the binary name \\
+  \bottomrule
+\end{longtable}
+
+\subsubsection*{8b. Gratuitously cryptic helpers}
+
+The following entries in \texttt{\textasciitilde/bin} have names
+that do not map to their behaviour, are infrequently invoked,
+and (in several cases) cannot be readily recalled without
+opening the file. Each requires a single-sitting audit ending in
+either a descriptive rename plus a one-line header comment, or
+removal.
+
+\begin{longtable}{@{}llp{2.5in}@{}}
+  \toprule
+  \textbf{Helper} & \textbf{Behaviour} & \textbf{Disposition} \\
+  \midrule
+  \texttt{bb}    & edits \texttt{\textasciitilde/docs/personal/preludelist.tex} & rename to \texttt{edit-preludes}, or absorb as the Phase 3 alias \\
+  \texttt{qcp}   & copies a built post PDF into the working directory          & rename to \texttt{pull-post-pdf}                                  \\
+  \texttt{p2}    & enscript-to-PDF-to-printer pipeline (two-up)                 & rename to \texttt{print-2up}                                      \\
+  \texttt{ss}    & opens latest PDF in Skim                                     & retire after Phase~5 (replaced by \texttt{latest-of} wrapper)     \\
+  \texttt{vv}    & edits latest Rmd/qmd in vim                                  & retire after Phase~5                                              \\
+  \texttt{zz}    & opens latest PDF in zathura                                  & retire after Phase~5                                              \\
+  \texttt{n1}    & unknown (33 lines)                                           & inspect; rename to a descriptive name or delete                   \\
+  \texttt{n2}    & unknown (22 lines)                                           & inspect; rename or delete                                         \\
+  \texttt{p1}    & unknown (23 lines)                                           & inspect; rename or delete                                         \\
+  \texttt{tn}    & unknown (546 lines, the largest unnamed helper)              & inspect; rename or delete; if kept, add a header comment         \\
+  \texttt{wisu}  & undocumented Mach-O binary                                   & inspect; if author cannot recall purpose, delete and recompile from source if ever needed again \\
+  \bottomrule
+\end{longtable}
+
+\paragraph{Action.} For each rename:
+\begin{enumerate}
+  \item Search for cross-references before touching the file:
+        \texttt{grep -r 'old-name' \textasciitilde/Library/LaunchAgents
+        /etc/cron* \$DOTFILES} (adjust paths to environment).
+  \item Use \texttt{git mv old new} so that history is preserved.
+  \item Update any references found in the previous step in the
+        same commit as the rename.
+  \item Add a one-line header comment to any helper kept under
+        an unfamiliar name, summarising what it does.
+\end{enumerate}
+
+\paragraph{Effort.} One hour, dominated by the audit of the
+unknown helpers. The renames themselves are individually cheap.
+
+\paragraph{Acceptance criteria.}
+\begin{itemize}
+  \item Every entry in \texttt{\textasciitilde/bin} either has a
+        name a reader can guess from its purpose, or has a
+        one-line header comment that clarifies the purpose.
+  \item No file in \texttt{\textasciitilde/bin} produces `I do
+        not remember what this does' on inspection.
+  \item All scheduler entries (launchd, systemd, cron, Make)
+        reference the new names.
+\end{itemize}
+
+\subsection{Phase 9: install a guardrail}
+
+The refactor of phases 1--8 cleans up a decade of accreted drift.
+Without an automated check, the same drift will reaccumulate
+within a few years.
+
+\paragraph{Action.} Add a \texttt{Makefile} target to the
+dotfiles repository:
+
+\begin{lstlisting}[language=make]
+lint:
+	@find ~/bin -maxdepth 1 -type f -perm +111 \
+	    | xargs -I{} sh -c \
+	      'head -1 "$$1" | grep -q "^#!.*sh" && echo "$$1"' _ {} \
+	    | xargs shellcheck
+\end{lstlisting}
+
+Wire \texttt{make lint} into a pre-commit hook on the dotfiles
+repository so that any new helper added to
+\texttt{\textasciitilde/bin} is statically analysed before it
+lands in version control. The check is intentionally narrow: it
+covers only shell scripts and only the top-level
+\texttt{\textasciitilde/bin}, not the long tail of subdirectories
+that may hold helpers in other languages.
+
+\paragraph{Effort.} Thirty minutes (including hook installation
+and a verification pass against the post-Phase-6 toolbox).
+
+\paragraph{Acceptance criteria.} \texttt{make lint} returns clean
+on the post-refactor toolbox. A deliberately broken script
+introduced as a test causes the pre-commit hook to fail.
+
+\section{Effort and Sequencing}
+
+\begin{longtable}{@{}lll@{}}
+  \toprule
+  \textbf{Phase} & \textbf{Description}                                  & \textbf{Effort} \\
+  \midrule
+  1 & Extract \texttt{gz}, \texttt{\_gz\_secret\_scan}, \texttt{gz-scan-history} & 4\,h            \\
+  2 & Extract \texttt{pp}, \texttt{rr}, \texttt{mma}, \texttt{mr}, \texttt{nav}  & 1\,h            \\
+  3 & Promote four microscripts to aliases                                       & 0.3\,h          \\
+  4 & Harden five remaining microscripts                                         & 1\,h            \\
+  5 & Consolidate \texttt{ss}, \texttt{vv}, \texttt{zz} into one helper          & 0.3\,h          \\
+  6 & Relocate non-executables out of \texttt{\textasciitilde/bin}               & 1\,h            \\
+  7 & Decommission \texttt{\textasciitilde/bin/archive/}                         & 0.1\,h          \\
+  8 & Naming hygiene (launchers, cryptic helpers)                                & 0.7\,h          \\
+  9 & Install \texttt{make lint} guardrail                                       & 0.5\,h          \\
+  \midrule
+    & \textbf{Total}                                                             & \textbf{8.9\,h} \\
+  \bottomrule
+\end{longtable}
+
+The phases are ordered by leverage: the early phases produce most
+of the visible improvement. A single working day suffices for the
+full plan, although the natural cadence is a phase per evening
+across two weeks, with each commit landed independently and
+verified in normal use before the next phase begins.
+
+\section{Risks and Mitigations}
+
+\paragraph{Schedulers refer to file names.}
+If a launchd plist, systemd unit, cron entry, or Makefile
+references a script by name, renaming or deleting the script
+silently breaks the scheduler. Before any rename or delete, run
+\texttt{grep -r "script-name" \textasciitilde/Library/LaunchAgents
+\textasciitilde/etc/cron* \$DOTFILES} (adjust paths to your
+environment). Land both the rename and the scheduler update in
+the same commit.
+
+\paragraph{Zsh-only constructs in extracted code.}
+\texttt{gz} and possibly other extractions use zsh-specific
+syntax that bash will not parse. The shebang must match the
+syntactic features actually in use. A bash shebang on a function
+that uses \texttt{\$\{(f)...\}} fails in unhelpful ways; default
+to \texttt{\#!/usr/bin/env zsh} for any extraction whose syntax
+has not been explicitly portabilised.
+
+\paragraph{Working directory and PATH inheritance.}
+A script extracted from a function inherits \texttt{PATH} and
+\texttt{\$PWD} from the calling shell, which is generally
+correct. The exception arises when the parent function previously
+ran inside a block that prepended a directory to \texttt{PATH};
+the new script needs to do its own \texttt{PATH} adjustment or
+use absolute paths. Verify by running the extracted script with
+\texttt{env -i} to surface any implicit-environment dependency.
+
+\paragraph{Secrets in extracted code.}
+A function previously sourced from \texttt{.zshrc} may have
+benefited from environment variables set elsewhere in the same
+file (the pattern \texttt{[[ -f \textasciitilde/.env ]] \&\& source
+\textasciitilde/.env} appears at line 25 of the audited file).
+The extracted script does not inherit those variables unless they
+were already \texttt{export}ed. Either source the env file
+explicitly inside the script or read secrets via a credential
+helper such as \texttt{pass}.
+
+\paragraph{Shellcheck false positives.}
+External programs invoked with computed argument arrays
+(\texttt{"\$\{args[@]\}"}) sometimes trigger \texttt{SC2068},
+\texttt{SC2086}, or \texttt{SC2154}. Disable per-line with a
+comment that names the reason; never blanket-disable a warning
+across the project.
+
+\paragraph{Loss of in-session state on accidental sourcing.}
+A sourced file shares the parent's namespace and can clobber any
+name defined there. An error in a sourced file (an unset variable
+under \texttt{set -u}, a stray \texttt{exit}) terminates the
+interactive session rather than a child process. The phase~1--6
+extractions are designed to be invoked, not sourced; verify after
+each extraction that no stale documentation or muscle memory is
+\texttt{source}ing them.
+
+\section{Validation Plan}
+
+After each phase, verify the following before proceeding to the
+next:
+
+\begin{enumerate}
+  \item \textbf{Behaviour.} The affected helpers continue to
+        produce identical observable output, exit codes, and
+        side effects on a representative input set.
+  \item \textbf{Lint.} \texttt{shellcheck \$f} returns clean for
+        each touched file in \texttt{\textasciitilde/bin}.
+  \item \textbf{Startup time.} \texttt{time zsh -i -c exit}
+        executed five times produces a stable startup time at or
+        below the post-Phase-1 baseline.
+  \item \textbf{Discoverability.} Each new helper in
+        \texttt{\textasciitilde/bin} appears under tab completion
+        against \texttt{\$PATH}; each new alias appears in
+        \texttt{alias} output.
+  \item \textbf{Reversibility.} The phase's commit is in version
+        control on its own. Reverting the single commit restores
+        the prior behaviour without manual cleanup.
+\end{enumerate}
+
+A short script (\texttt{\textasciitilde/bin/dotfiles-doctor})
+that runs all five checks and reports a single pass/fail line
+is a useful by-product of the refactor.
+
+\section{Expected Outcomes}
+
+After execution of all nine phases:
+
+\begin{itemize}
+  \item \texttt{.zshrc} shrinks from approximately 736 lines to
+        approximately 350 lines. The remainder is OS-conditional
+        configuration, plugin and completion initialisation, the
+        prompt, and the legitimate shell-state functions.
+  \item \texttt{\textasciitilde/bin} becomes a flat directory of
+        correctly-shebanged, \texttt{shellcheck}-clean
+        executables (with at most a \texttt{lib/} subdirectory
+        for sourced helpers).
+  \item Shell startup time decreases by an estimated 50--150\,ms
+        from the function extractions in phases 1--2. The
+        dominant contribution comes from removing the \texttt{gz}
+        family.
+  \item Every helper in the toolbox is one \texttt{git log} away
+        from full history, one \texttt{shellcheck} away from
+        lint, and one \texttt{cat} away from a complete reading.
+  \item The \texttt{make lint} guardrail prevents the same
+        drift from reaccumulating.
+\end{itemize}
+
+\paragraph{Caveat on the startup-time projection.} The 50--150\,ms
+estimate above accounts only for the function-extraction phases.
+After execution, the dominant remaining startup cost in the
+audited file is the conda initialisation block (lines 634--647),
+which invokes \texttt{conda 'shell.zsh' 'hook'} on every shell
+launch, spawning a Python interpreter. On the audited machine
+this adds roughly 50--150\,ms by itself, so the perceived
+improvement to interactive responsiveness will be smaller than
+the function-extraction numbers alone suggest. The standard
+mitigation is to lazy-load conda: replace the eager hook with a
+shell stub that initialises conda only on first \texttt{conda}
+invocation. This is out of scope for the current plan but worth
+considering as a follow-up; it is the highest-leverage remaining
+intervention on shell startup time.
+
+The largest qualitative gain is composability. Scripts in
+\texttt{\textasciitilde/bin} are picked up by anything that
+respects \texttt{PATH}: cron, launchd, Make rules, Docker
+containers that mount the home directory, HPC submission
+scripts, scheduled GitHub Actions runners. Functions buried in
+\texttt{.zshrc} are visible only to interactive zsh sessions on
+the host that holds the file. The phases above convert helpers
+that the author has already written into helpers that any
+tooling can call.
+
+\appendix
+
+\section{Replacement for ss / vv / zz (Phase 5)}
+
+Place at \texttt{\textasciitilde/bin/latest-of}:
+
+\begin{lstlisting}[language=bash]
+#!/usr/bin/env bash
+# latest-of: open the most recent file in $PWD whose name matches
+# a regex, using the named viewer. Designed to be wrapped by
+# small helpers (see ss, vv, zz).
+#
+# Usage: latest-of <regex> <viewer> [viewer-args...]
+set -euo pipefail
+
+pattern="${1:?usage: latest-of <regex> <viewer> [args...]}"
+viewer="${2:?usage: latest-of <regex> <viewer> [args...]}"
+shift 2
+
+# ls -At sorts by mtime, newest first; head -n 1 picks the newest
+# match. grep -E supplies extended regex.
+file=$(ls -At | grep -E -- "$pattern" | head -n 1 || true)
+if [[ -z "$file" ]]; then
+    echo "latest-of: no file in $PWD matches /$pattern/" >&2
+    exit 1
+fi
+
+exec "$viewer" "$@" -- "$file"
+\end{lstlisting}
+
+Then replace \texttt{ss}, \texttt{vv}, \texttt{zz} with two-line
+wrappers (or aliases):
+
+\begin{lstlisting}[language=bash]
+#!/usr/bin/env bash
+# ~/bin/ss: open the most recent PDF with Skim.
+exec latest-of '\.pdf$' open -a Skim
+\end{lstlisting}
+
+\begin{lstlisting}[language=bash]
+#!/usr/bin/env bash
+# ~/bin/vv: edit the most recent R/Markdown document with vim.
+exec latest-of '\.(R|r)?md$|\.qmd$' vim
+\end{lstlisting}
+
+\begin{lstlisting}[language=bash]
+#!/usr/bin/env bash
+# ~/bin/zz: open the most recent PDF with zathura.
+exec latest-of '\.pdf$' zathura
+\end{lstlisting}
+
+\section{Glossary}
+
+\begin{itemize}[leftmargin=1em,itemsep=4pt]
+  \item \textbf{Process.}
+    An operating-system execution unit with its own memory,
+    environment, file descriptors, and a unique process
+    identifier. The operating system isolates processes so that
+    one cannot read or write another's memory directly.
+  \item \textbf{State.}
+    The information a process holds in memory at a given moment.
+    For a shell process, state includes the working directory,
+    the values of environment and local variables, defined
+    aliases and functions, shell options, the history list, the
+    directory stack, and the job table.
+  \item \textbf{Namespace.}
+    The set of names (variables, functions, aliases) visible to
+    a particular execution context. The interactive shell
+    maintains one namespace; a child process receives a copy of
+    the exported portion and nothing else.
+  \item \textbf{Scope.}
+    The region of code in which a given name is defined and
+    accessible. Functions and scripts have distinct scopes by
+    construction.
+  \item \textbf{Reproducibility.}
+    The property that re-running the same code on the same
+    inputs in the same environment yields the same outputs.
+    Requires both that the code be captured and that the
+    environment be characterised.
+  \item \textbf{Source (verb).}
+    To execute a file's commands in the current shell rather
+    than in a child process; the only mechanism by which a file
+    can mutate the calling shell's state.
+\end{itemize}
+
+\vfill
+\hrule
+\vspace{0.5em}
+{\small \emph{Rendered on 2026-05-03 at 11:14 PDT.}\\
+\emph{Source:}
+\texttt{\textasciitilde/prj/qblog/posts/51-scripts-vs-functions/}\\
+\hspace*{1.5em}\texttt{scripts-vs-functions/analysis/configs/}\\
+\hspace*{1.5em}\texttt{dotfiles\_refactor\_plan.tex}}
+
+\end{document}
