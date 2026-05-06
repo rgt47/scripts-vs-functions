@@ -20,7 +20,9 @@
       "Bash(shellcheck ~/bin/backup_research.sh)",
       "Bash(echo \"exit: $?\")",
       "Bash(bash -n ~/bin/backup_research.sh)",
-      "Bash(shellcheck ~/bin/tn)"
+      "Bash(shellcheck ~/bin/tn)",
+      "Bash(pandoc MULTI_LAPTOP_PLAN.md -o MULTI_LAPTOP_PLAN.pdf --pdf-engine=xelatex -V monofont=\"DejaVu Sans Mono\" -V geometry:margin=0.9in)",
+      "Bash(open MULTI_LAPTOP_PLAN.pdf)"
     ]
   }
 }
