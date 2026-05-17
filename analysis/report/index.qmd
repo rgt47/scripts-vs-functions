@@ -1,6 +1,5 @@
 ---
 title: 'Refactoring a Personal Toolbox: Scripts versus Shell Functions'
-subtitle: 'A principled split for accumulated helpers in dotfiles and ~/bin'
 author: "Ronald 'Ryy' G. Thomas"
 date: '2026-04-25'
 categories: [shell]
@@ -27,7 +26,7 @@ format:
   pdf:
     pdf-engine: xelatex
     documentclass: scrartcl
-    toc: true
+    toc: false
     number-sections: true
     colorlinks: true
     papersize: letter
@@ -39,7 +38,7 @@ format:
 ---
 
 ![A workshop pegboard, organised so that each tool sits in its own
-labelled outline.](media/images/hero.png){.img-fluid width=80%}
+labelled outline.](media/images/hero.png){.img-fluid width=80% fig-align="center"}
 
 *A personal toolbox earns its keep when each helper sits in the place
 that fits its job, with no doubt about which drawer to open.*
